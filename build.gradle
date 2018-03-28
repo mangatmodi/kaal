@@ -1,269 +1,70 @@
 buildscript {
+    ext.kotlin_version = '1.2.31'
+
     repositories {
-        maven {
-            url = uri("https://plugins.gradle.org/m2/")
-        }
-        jcenter()
         mavenCentral()
     }
 
     dependencies {
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.2.30"
-        classpath "org.junit.platform:junit-platform-gradle-plugin:1.0.2"
-        classpath "com.github.jengelman.gradle.plugins:shadow:2.0.2"
-        classpath "com.avast.gradle:gradle-docker-compose-plugin:0.6.12"
-        classpath "gradle.plugin.com.palantir.gradle.docker:gradle-docker:0.17.2"
-        classpath "gradle.plugin.com.palantir.gradle.gitversion:gradle-git-version:0.10.1"
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.2.31"
     }
 }
 
-plugins {
-    id 'java'
-    id "org.jetbrains.kotlin.jvm" version "1.2.30"
-    id 'maven-publish'
-}
+apply plugin: 'kotlin'
 
+kotlin {
+    repositories {
+        jcenter()
+        mavenCentral()
+    }
+
+    experimental {
+        coroutines 'enable'
+    }
+
+    dependencies {
+    }
+}
 repositories {
-    jcenter()
+    mavenCentral()
 }
-
 configurations {
     ktlint
 }
-
 dependencies {
+    compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
+    compile group: 'commons-cli', name: 'commons-cli', version: '1.4'
     ktlint "com.github.shyiko:ktlint:0.19.0"
 }
-
-task ktlintIdea(type: JavaExec, group: "formatting") {
-    description = "Apply Ktlint rules to Idea."
-    main = "com.github.shyiko.ktlint.Main"
-    classpath = configurations.ktlint
-    args "--apply-to-idea", "-y"
+compileKotlin {
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
 }
-
-task initGitHooks(type: Exec) {
-    executable "sh"
-    args = ["-c", "git config core.hooksPath .githooks"]
-}
-
-task ktlintApplyRules(dependsOn: ktlintIdea)
-
-task initProject(type: GradleBuild) {
-    tasks = ['initGitHooks', 'ktlintApplyRules']
-}
-
-subprojects {
-    group = 'com.github.mangatmodi.kaal'
-    version = '0.0.1'
-
-    ext.versions = [
-            'shadowPlugin'          : '2.0.2',
-
-            'vertx'                 : '3.5.0',
-            'vertxGuice'            : '2.3.1',
-            'jersey'                : '4.7.0',
-            'rxjava'                : '2.1.6',
-
-            'slf4j'                 : '1.7.25',
-            'logback'               : '1.2.2',
-            'logstashLogbackEncoder': '5.0',
-
-            'guice'                 : '4.1.0',
-            'guiceHk2Bridge'        : '2.5.0-b32',
-
-            'jackson'               : '2.9.4',
-
-            'apacheCommons'         : '3.6',
-            'commons-cli'               : '1.4',
-
-            'junit'                 : '5.0.2',
-            'kotlinTest'            : '2.0.7',
-            'restAssured'           : '3.0.6',
-    ]
-
-    configurations {
-        ktlint
+compileTestKotlin {
+    kotlinOptions {
+        jvmTarget = "1.8"
     }
 
-    buildscript {
-        repositories {
-            jcenter()
-        }
-    }
-
-    apply plugin: "java"    
-    apply plugin: "kotlin"
-    apply plugin: "idea"
-    apply plugin: "org.jetbrains.kotlin.jvm"
-    apply plugin: "com.github.johnrengelman.shadow"
-    apply plugin: "docker-compose"
-    apply plugin: "maven-publish"
-    apply plugin: "com.palantir.git-version"
-
-    // dependencies
-    repositories {
-        jcenter()
-        mavenCentral()
-    }
-
-    dependencies {
-        compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
-        compile "org.jetbrains.kotlin:kotlin-reflect"
-        compile "org.jetbrains.kotlin:kotlin-runtime"
-
-        testCompile "org.junit.jupiter:junit-jupiter-api:$versions.junit"
-        testCompile "org.junit.jupiter:junit-jupiter-engine:$versions.junit"
-        testCompile "org.hamcrest:hamcrest-junit:2.0.0.0"
-
-        ktlint "com.github.shyiko:ktlint:0.19.0"
-    }
-
-    // shadow-jar
-    shadowJar {
-        mergeServiceFiles()
-    }
-
-
-    if (file('.docker-flavor').exists()) {
-        def gitDetails = versionDetails()
-        String jarName = shadowJar.archiveName
-        String projectTag = "${project.version}-${gitDetails.gitHash}"
-        String baseDockerName = "mangatmodi/kaal-main"
-        String taggedDockerName = "$baseDockerName:$projectTag"
-
-        apply plugin: "com.palantir.docker"
-
-        // docker
-        docker {
-            name = taggedDockerName
-            buildArgs([JAR_NAME: jarName])
-            dockerfile file("${project.projectDir}/src/main/docker/${project.name}/Dockerfile")
-            files shadowJar.outputs.files
+    if (project.plugins.hasPlugin("org.jetbrains.kotlin.jvm")) {
+        task ktlint(type: JavaExec, group: "verification") {
+            description = "Check Kotlin code style."
+            main = "com.github.shyiko.ktlint.Main"
+            classpath = configurations.ktlint
+            args "src/**/*.kt"
+            // to generate report in checkstyle format prepend following args:
+            // "--reporter=plain", "--reporter=checkstyle,output=${buildDir}/ktlint.xml"
+            // see https://github.com/shyiko/ktlint#usage for more
         }
 
-        tasks.docker.dependsOn shadowJar
+        check.dependsOn ktlint
 
-        // docker-compose
-        dockerCompose {
-            useComposeFiles = ["$project.projectDir/src/main/docker/docker-compose.yml"]
-            captureContainersOutput = true
-            environment["DOCKER_IMAGE"] = project.docker.name
-            environment["HOST_ADDRESS"] = InetAddress.localHost.hostName
+        task ktlintFormat(type: JavaExec, group: "formatting") {
+            description = "Fix Kotlin code style deviations."
+            main = "com.github.shyiko.ktlint.Main"
+            classpath = configurations.ktlint
+            args "-F", "src/**/*.kt"
         }
-
-        composeUp.dependsOn tasks.docker
-
-        // integration test
-        configurations {
-            integrationTest.extendsFrom testCompile
-            integrationTestCompile.extendsFrom testCompile
-            integrationTestRuntime.extendsFrom testRuntime
-        }
-
-        sourceSets {
-            "integrationTest" {
-                java.srcDirs file('src/test/kotlin')
-                resources.srcDir file('src/test/resources')
-
-                compileClasspath += main.output + test.output + configurations.integrationTest
-                runtimeClasspath += output + compileClasspath + configurations.integrationTestRuntime
-            }
-        }
-
-        idea {
-            module {
-                testSourceDirs += sourceSets.integrationTest.allSource.srcDirs
-                testSourceDirs += sourceSets.integrationTest.resources.srcDirs
-            }
-        }
-
-        task integrationTestEnvironment() {
-            doFirst {
-                dockerCompose.environment["CONFIG_PROFILE"] = "test"
-            }
-        }
-
-        task integrationTest(type: Test) {
-            group = LifecycleBasePlugin.VERIFICATION_GROUP
-            description = 'Runs the integration tests'
-
-            maxHeapSize = '1024m'
-
-            testClassesDirs += sourceSets.integrationTest.output.classesDirs
-            classpath += sourceSets.integrationTest.output.classesDirs
-
-            binResultsDir = file("$buildDir/integration-test-results/binary/integTest")
-
-            reports {
-                html.destination file("$buildDir/reports/integration-test")
-                junitXml.destination file("$buildDir/integration-test-results")
-            }
-
-            mustRunAfter tasks.test
-        }
-
-        dockerCompose.isRequiredBy(integrationTest)
-        integrationTest.dependsOn tasks.docker, integrationTestEnvironment
-        composeUp.mustRunAfter integrationTestEnvironment
-        check.dependsOn integrationTest
-
-        // Tags the current image produced by the docker task with latest tag
-        task dockerTagLatest {
-            doLast {
-                String latestTag = "$baseDockerName:latest"
-                println("Tagging $latestTag")
-                exec {
-                    executable = "sh"
-                    args = ["-c", "docker tag ${project.docker.name} $latestTag"]
-                }
-            }
-        }
-
-        // Pushes the given tag to repository
-        // e.g. ./gradlew dockerPushTag -Ptag=latest
-        task dockerPushTag {
-            doLast {
-                String tag = project.hasProperty('tag') ? project.getProperty('tag') : projectTag
-                println("Pushing ${project.docker.name}")
-                exec {
-                    executable = "sh"
-                    args = ["-c", "docker push ${project.docker.name}"]
-                }
-            }
-        }
-
-
-        if (project.plugins.hasPlugin("org.jetbrains.kotlin.jvm")) {
-            task ktlint(type: JavaExec, group: "verification") {
-                description = "Check Kotlin code style."
-                main = "com.github.shyiko.ktlint.Main"
-                classpath = configurations.ktlint
-                args "src/**/*.kt"
-                // to generate report in checkstyle format prepend following args:
-                // "--reporter=plain", "--reporter=checkstyle,output=${buildDir}/ktlint.xml"
-                // see https://github.com/shyiko/ktlint#usage for more
-            }
-
-            check.dependsOn ktlint
-
-            task ktlintFormat(type: JavaExec, group: "formatting") {
-                description = "Fix Kotlin code style deviations."
-                main = "com.github.shyiko.ktlint.Main"
-                classpath = configurations.ktlint
-                args "-F", "src/**/*.kt"
-            }
-
-        }
-
-        // kotlin
-        tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).all {
-            kotlinOptions {
-                jvmTarget = "1.8"
-            }
-        }
-
-        task allDependencies(type: DependencyReportTask) {}
 
     }
 }
